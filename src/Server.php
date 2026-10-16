@@ -288,6 +288,22 @@ class Server
         return $response;
     }
 
+    /**
+     * Split a SPARQL Update into its INSERT / DELETE blocks, in order.
+     *
+     * Each block is matched on its own. A single greedy match across the body
+     * read `DELETE DATA { a }; INSERT DATA { b }` as a DELETE of b, so a
+     * client replacing a value lost both the old and the new one.
+     *
+     * @return array<array{0: string, 1: string}> [command, triples] pairs
+     */
+    private static function sparqlUpdateBlocks(string $contents): array
+    {
+        preg_match_all('/\b(INSERT|DELETE)(?:\s+DATA)?\s*\{([^}]*)\}/i', $contents, $matches, PREG_SET_ORDER);
+
+        return array_map(static fn (array $match) => [strtoupper($match[1]), $match[2]], $matches);
+    }
+
     private function handleSparqlUpdate(Response $response, string $path, $contents): Response
     {
         $filesystem = $this->filesystem;
@@ -306,10 +322,8 @@ class Server
             // FIXME: Use enums from namespace Pdsinterop\Rdf\Enum\Format instead of 'turtle'?
 
             // parse query in contents
-            if (preg_match_all("/((INSERT|DELETE).*{([^}]*)})+/", $contents, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $match) {
-                    $command = $match[2];
-                    $triples = $match[3];
+            if ($blocks = self::sparqlUpdateBlocks($contents)) {
+                foreach ($blocks as [$command, $triples]) {
 
                     // apply changes to ttl data
                     switch($command) {
